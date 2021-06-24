@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 
 #include "platform.h"
 
@@ -106,7 +107,28 @@
 
 #include "core.h"
 
+/* PidALtHold parameters*/
+#define PID_KP  2.0f
+#define PID_KI  1.0f
+#define PID_KD  0.05f
 
+#define PID_TAU 0.02f
+
+#define PID_LIM_MIN -15.0f
+#define PID_LIM_MAX  15.0f
+
+#define PID_LIM_MIN_INT -5.0f
+#define PID_LIM_MAX_INT  5.0f
+
+#define SAMPLE_TIME_S 0.025f
+
+static PIDControllerType pidAltHold;
+
+#define ROLLBUF_SIZE        4U
+static int32_t RollingAltVal[ROLLBUF_SIZE];
+static uint8_t AltValuesIndex = 0;
+
+/*End PIDaLt hold*/
 enum {
     ALIGN_GYRO = 0,
     ALIGN_ACCEL = 1,
@@ -1090,6 +1112,12 @@ void processRxModes(timeUs_t currentTimeUs)
     pidSetAntiGravityState(IS_RC_MODE_ACTIVE(BOXANTIGRAVITY) || featureIsEnabled(FEATURE_ANTI_GRAVITY));
 }
 
+
+
+
+
+
+
 static FAST_CODE void subTaskPidController(timeUs_t currentTimeUs)
 {
     uint32_t startTime = 0;
@@ -1275,6 +1303,113 @@ FAST_CODE void taskFiltering(timeUs_t currentTimeUs)
 
 }
 
+static FAST_CODE void subTaskAltitudeHold( void )
+{
+	static uint16_t prevFlightMode = 0;
+	static float throttle_sp = 0;
+	static int32_t holdAltitude =0;
+
+	static int32_t MeasuredAvgAltitude =0;
+
+	int32_t tmpp =0;
+
+	bool NewMeasurement = false;
+	//static int32_t PrevMeasuredAvgAltitude = 0;
+
+
+	/*baro updated every 25ms ...*/
+
+	if ( IsAltitudeValNew() )
+	{
+		NewMeasurement = true;
+
+		SetAltitudeValueOld();
+
+		RollingAltVal[AltValuesIndex] = getEstimatedAltitudeCm();
+
+		AltValuesIndex++;
+	    AltValuesIndex %= ROLLBUF_SIZE;
+
+		/*calculate new avg altitude*/
+	    MeasuredAvgAltitude = 0;
+
+		for( uint8_t i = 0; i < ROLLBUF_SIZE; i++ )
+		{
+			MeasuredAvgAltitude += RollingAltVal[i];
+		}
+
+		/* unit 0.1m */
+		MeasuredAvgAltitude = (MeasuredAvgAltitude + 5u) / (ROLLBUF_SIZE * 10u);
+
+		/* allow update if change bigger than 10cm*/
+/*
+		if (abs(MeasuredAvgAltitude - PrevMeasuredAvgAltitude) <= 1U )
+		{
+			MeasuredAvgAltitude = PrevMeasuredAvgAltitude;
+		}
+		else
+		{
+			PrevMeasuredAvgAltitude = MeasuredAvgAltitude;
+		}
+*/
+
+		tmpp = MeasuredAvgAltitude;
+		DEBUG_SET(DEBUG_ALTITUDE, 1, tmpp);
+
+	}
+
+
+	if ( FLIGHT_MODE(ANGLE_MODE) == ANGLE_MODE )
+	{
+
+		if (( prevFlightMode & ANGLE_MODE )  != ANGLE_MODE )
+		{
+			/* get target altitude from Baro*/
+			holdAltitude = MeasuredAvgAltitude;
+
+			/* get throttle set point 1000 - 2000*/
+			throttle_sp = rcCommand[THROTTLE];
+
+			/*init PID AltHold*/
+			pidAltHold.Kp = PID_KP;
+			pidAltHold.Ki = PID_KI;
+			pidAltHold.Kd = PID_KD;
+			pidAltHold.tau = PID_TAU;
+			pidAltHold.limMinInt = PID_LIM_MIN_INT;
+			pidAltHold.limMaxInt = PID_LIM_MAX_INT;
+			pidAltHold.limMin = PID_LIM_MIN;
+			pidAltHold.limMax = PID_LIM_MAX;
+			pidAltHold.T = SAMPLE_TIME_S;
+			pidAltHold.prevMeasurement = holdAltitude;
+
+			PIDController_Init( &pidAltHold );
+
+		}
+
+		/*Perform PID only when NEW measurement is available !!!*/
+		if ( NewMeasurement == true )
+		{
+			/*pid loop for throttle*/
+		    (void)PIDController_Update( &pidAltHold, holdAltitude, MeasuredAvgAltitude );
+
+		}
+
+		/*write new throttle value*/
+		rcCommand[THROTTLE] = throttle_sp + pidAltHold.out;
+
+		DEBUG_SET(DEBUG_ALTITUDE, 2, pidAltHold.out);
+
+		DEBUG_SET(DEBUG_ALTITUDE, 3, rcCommand[THROTTLE]);
+	}
+
+	prevFlightMode = flightModeFlags;
+
+
+
+
+}
+
+
 // Function for loop trigger
 FAST_CODE void taskMainPidLoop(timeUs_t currentTimeUs)
 {
@@ -1291,6 +1426,7 @@ FAST_CODE void taskMainPidLoop(timeUs_t currentTimeUs)
     DEBUG_SET(DEBUG_PIDLOOP, 0, micros() - currentTimeUs);
 
     subTaskRcCommand(currentTimeUs);
+    subTaskAltitudeHold();
     subTaskPidController(currentTimeUs);
     subTaskMotorUpdate(currentTimeUs);
     subTaskPidSubprocesses(currentTimeUs);
@@ -1329,3 +1465,9 @@ bool isLaunchControlActive(void)
     return false;
 #endif
 }
+
+
+
+
+
+

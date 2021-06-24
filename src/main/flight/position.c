@@ -56,6 +56,8 @@ PG_RESET_TEMPLATE(positionConfig_t, positionConfig,
     .altSource = DEFAULT,
 );
 
+static bool NewAltitudeValue = false;
+
 static int32_t estimatedAltitudeCm = 0;                // in cm
 
 #define BARO_UPDATE_FREQUENCY_40HZ (1000 * 25)
@@ -94,9 +96,10 @@ void calculateEstimatedAltitude(timeUs_t currentTimeUs)
 
     const uint32_t dTime = currentTimeUs - previousTimeUs;
     if (dTime < BARO_UPDATE_FREQUENCY_40HZ) {
-        return;
+    	return;
     }
     previousTimeUs = currentTimeUs;
+
 
     int32_t baroAlt = 0;
     int32_t gpsAlt = 0;
@@ -146,6 +149,9 @@ void calculateEstimatedAltitude(timeUs_t currentTimeUs)
 
 
     if (haveGpsAlt && haveBaroAlt && positionConfig()->altSource == DEFAULT) {
+
+    	NewAltitudeValue = true;
+
         if (ARMING_FLAG(ARMED)) {
             estimatedAltitudeCm = gpsAlt * gpsTrust + baroAlt * (1 - gpsTrust);
         } else {
@@ -156,11 +162,17 @@ void calculateEstimatedAltitude(timeUs_t currentTimeUs)
         estimatedVario = calculateEstimatedVario(baroAlt, dTime);
 #endif
     } else if (haveGpsAlt && (positionConfig()->altSource == GPS_ONLY || positionConfig()->altSource == DEFAULT )) {
+
+    	NewAltitudeValue = true;
+
         estimatedAltitudeCm = gpsAlt;
 #if defined(USE_VARIO) && defined(USE_GPS)
         estimatedVario = gpsVertSpeed;
 #endif
     } else if (haveBaroAlt && (positionConfig()->altSource == BARO_ONLY || positionConfig()->altSource == DEFAULT)) {
+
+    	NewAltitudeValue = true;
+
         estimatedAltitudeCm = baroAlt;
 #ifdef USE_VARIO
         estimatedVario = calculateEstimatedVario(baroAlt, dTime);
@@ -169,11 +181,13 @@ void calculateEstimatedAltitude(timeUs_t currentTimeUs)
 
 	
 
-    DEBUG_SET(DEBUG_ALTITUDE, 0, (int32_t)(100 * gpsTrust));
-    DEBUG_SET(DEBUG_ALTITUDE, 1, baroAlt);
-    DEBUG_SET(DEBUG_ALTITUDE, 2, gpsAlt);
+
+    DEBUG_SET(DEBUG_ALTITUDE, 0, baroAlt);
+    //DEBUG_SET(DEBUG_ALTITUDE, 0, (int32_t)(100 * gpsTrust));
+    //DEBUG_SET(DEBUG_ALTITUDE, 1, baroAlt);
+    //DEBUG_SET(DEBUG_ALTITUDE, 2, gpsAlt);
 #ifdef USE_VARIO
-    DEBUG_SET(DEBUG_ALTITUDE, 3, estimatedVario);
+    //DEBUG_SET(DEBUG_ALTITUDE, 3, estimatedVario);
 #endif
 }
 
@@ -186,6 +200,16 @@ bool isAltitudeOffset(void)
 int32_t getEstimatedAltitudeCm(void)
 {
     return estimatedAltitudeCm;
+}
+
+bool IsAltitudeValNew(void)
+{
+	return NewAltitudeValue;
+}
+
+void SetAltitudeValueOld(void)
+{
+	NewAltitudeValue = false;
 }
 
 #ifdef USE_VARIO

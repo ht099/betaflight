@@ -31,4 +31,6 @@ PG_DECLARE(positionConfig_t, positionConfig);
 bool isAltitudeOffset(void);
 void calculateEstimatedAltitude(timeUs_t currentTimeUs);
 int32_t getEstimatedAltitudeCm(void);
+bool IsAltitudeValNew(void);
+void SetAltitudeValueOld(void);
 int16_t getEstimatedVario(void);
