@@ -27,6 +27,7 @@ COMMON_SRC = \
             drivers/buttons.c \
             drivers/display.c \
             drivers/display_canvas.c \
+            drivers/dma_common.c \
             drivers/dma_reqmap.c \
             drivers/exti.c \
             drivers/io.c \
@@ -91,9 +92,9 @@ COMMON_SRC = \
             flight/position.c \
             flight/failsafe.c \
             flight/gps_rescue.c \
-            flight/gyroanalyse.c \
+            flight/dyn_notch_filter.c \
             flight/imu.c \
-            flight/interpolated_setpoint.c \
+            flight/feedforward.c \
             flight/mixer.c \
             flight/mixer_init.c \
             flight/mixer_tricopter.c \
@@ -257,7 +258,7 @@ SPEED_OPTIMISED_SRC := $(SPEED_OPTIMISED_SRC) \
             fc/rc.c \
             fc/rc_controls.c \
             fc/runtime_config.c \
-            flight/gyroanalyse.c \
+            flight/dyn_notch_filter.c \
             flight/imu.c \
             flight/mixer.c \
             flight/pid.c \
@@ -294,6 +295,7 @@ SIZE_OPTIMISED_SRC := $(SIZE_OPTIMISED_SRC) \
             drivers/barometer/barometer_lps.c \
             drivers/barometer/barometer_qmp6988.c \
             drivers/bus_i2c_config.c \
+            drivers/bus_i2c_timing.c \
             drivers/bus_spi_config.c \
             drivers/bus_spi_pinconfig.c \
             drivers/compass/compass_ak8963.c \
@@ -406,6 +408,7 @@ SRC += \
             drivers/flash.c \
             drivers/flash_m25p16.c \
             drivers/flash_w25n01g.c \
+            drivers/flash_w25q128fv.c \
             drivers/flash_w25m.c \
             io/flashfs.c \
             $(MSC_SRC)
@@ -447,3 +450,12 @@ endif
 
 # Search path and source files for the ST stdperiph library
 VPATH        := $(VPATH):$(STDPERIPH_DIR)/src
+
+# Search path and source files for the Open Location Code library
+OLC_DIR = $(ROOT)/lib/main/google/olc
+
+ifneq ($(OLC_DIR),)
+INCLUDE_DIRS += $(OLC_DIR)
+SRC += $(OLC_DIR)/olc.c
+SIZE_OPTIMISED_SRC += $(OLC_DIR)/olc.c
+endif

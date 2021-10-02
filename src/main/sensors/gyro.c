@@ -45,8 +45,8 @@
 #include "config/config.h"
 #include "fc/runtime_config.h"
 
-#ifdef USE_GYRO_DATA_ANALYSE
-#include "flight/gyroanalyse.h"
+#ifdef USE_DYN_NOTCH_FILTER
+#include "flight/dyn_notch_filter.h"
 #endif
 #include "flight/rpm_filter.h"
 
@@ -109,13 +109,13 @@ void pgResetFn_gyroConfig(gyroConfig_t *gyroConfig)
     gyroConfig->gyroCalibrationDuration = 125;        // 1.25 seconds
     gyroConfig->gyroMovementCalibrationThreshold = 48;
     gyroConfig->gyro_hardware_lpf = GYRO_HARDWARE_LPF_NORMAL;
-    gyroConfig->gyro_lowpass_type = FILTER_PT1;
-    gyroConfig->gyro_lowpass_hz = 200;  // NOTE: dynamic lpf is enabled by default so this setting is actually
+    gyroConfig->gyro_lpf1_type = FILTER_PT1;
+    gyroConfig->gyro_lpf1_static_hz = 250;  // NOTE: dynamic lpf is enabled by default so this setting is actually
                                         // overridden and the static lowpass 1 is disabled. We can't set this
                                         // value to 0 otherwise Configurator versions 10.4 and earlier will also
                                         // reset the lowpass filter type to PT1 overriding the desired BIQUAD setting.
-    gyroConfig->gyro_lowpass2_type = FILTER_PT1;
-    gyroConfig->gyro_lowpass2_hz = GYRO_LOWPASS_2_HZ_DEFAULT;
+    gyroConfig->gyro_lpf2_type = FILTER_PT1;
+    gyroConfig->gyro_lpf2_static_hz = GYRO_LPF2_HZ_DEFAULT;
     gyroConfig->gyro_high_fsr = false;
     gyroConfig->gyro_to_use = GYRO_CONFIG_USE_GYRO_DEFAULT;
     gyroConfig->gyro_soft_notch_hz_1 = 0;
@@ -126,24 +126,13 @@ void pgResetFn_gyroConfig(gyroConfig_t *gyroConfig)
     gyroConfig->gyro_offset_yaw = 0;
     gyroConfig->yaw_spin_recovery = YAW_SPIN_RECOVERY_AUTO;
     gyroConfig->yaw_spin_threshold = 1950;
-    gyroConfig->dyn_lpf_gyro_min_hz = DYN_LPF_GYRO_MIN_HZ_DEFAULT;
-    gyroConfig->dyn_lpf_gyro_max_hz = DYN_LPF_GYRO_MAX_HZ_DEFAULT;
-    gyroConfig->dyn_notch_max_hz = 600;
-    gyroConfig->dyn_notch_count = 1;
-    gyroConfig->dyn_notch_bandwidth_hz = 45;
-    gyroConfig->dyn_notch_min_hz = 150;
+    gyroConfig->gyro_lpf1_dyn_min_hz = GYRO_LPF1_DYN_MIN_HZ_DEFAULT;
+    gyroConfig->gyro_lpf1_dyn_max_hz = GYRO_LPF1_DYN_MAX_HZ_DEFAULT;
     gyroConfig->gyro_filter_debug_axis = FD_ROLL;
-    gyroConfig->dyn_lpf_curve_expo = 5;
-	gyroConfig->simplified_gyro_filter = false;
-	gyroConfig->simplified_gyro_filter_multiplier = SIMPLIFIED_TUNING_DEFAULT;
+    gyroConfig->gyro_lpf1_dyn_expo = 5;
+    gyroConfig->simplified_gyro_filter = true;
+    gyroConfig->simplified_gyro_filter_multiplier = SIMPLIFIED_TUNING_DEFAULT;
 }
-
-#ifdef USE_GYRO_DATA_ANALYSE
-bool isDynamicFilterActive(void)
-{
-    return featureIsEnabled(FEATURE_DYNAMIC_FILTER);
-}
-#endif
 
 FAST_CODE bool isGyroSensorCalibrationComplete(const gyroSensor_t *gyroSensor)
 {
@@ -382,7 +371,7 @@ static FAST_CODE void checkForYawSpin(timeUs_t currentTimeUs)
 }
 #endif // USE_YAW_SPIN_RECOVERY
 
-static FAST_CODE FAST_CODE_NOINLINE void gyroUpdateSensor(gyroSensor_t *gyroSensor)
+static FAST_CODE void gyroUpdateSensor(gyroSensor_t *gyroSensor)
 {
     if (!gyroSensor->gyroDev.readFn(&gyroSensor->gyroDev)) {
         return;
@@ -482,9 +471,9 @@ FAST_CODE void gyroFiltering(timeUs_t currentTimeUs)
         filterGyroDebug();
     }
 
-#ifdef USE_GYRO_DATA_ANALYSE
+#ifdef USE_DYN_NOTCH_FILTER
     if (isDynamicFilterActive()) {
-        gyroDataAnalyse(&gyro.gyroAnalyseState);
+        dynNotchUpdate();
     }
 #endif
 
@@ -635,17 +624,29 @@ void dynLpfGyroUpdate(float throttle)
         } else {
             cutoffFreq = fmax(dynThrottle(throttle) * gyro.dynLpfMax, gyro.dynLpfMin);
         }
-        if (gyro.dynLpfFilter == DYN_LPF_PT1) {
-            DEBUG_SET(DEBUG_DYN_LPF, 2, cutoffFreq);
-            const float gyroDt = gyro.targetLooptime * 1e-6f;
+        DEBUG_SET(DEBUG_DYN_LPF, 2, cutoffFreq);
+        const float gyroDt = gyro.targetLooptime * 1e-6f;
+        switch (gyro.dynLpfFilter) {
+        case DYN_LPF_PT1:
             for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {
                 pt1FilterUpdateCutoff(&gyro.lowpassFilter[axis].pt1FilterState, pt1FilterGain(cutoffFreq, gyroDt));
             }
-        } else if (gyro.dynLpfFilter == DYN_LPF_BIQUAD) {
-            DEBUG_SET(DEBUG_DYN_LPF, 2, cutoffFreq);
+            break;
+        case DYN_LPF_BIQUAD:
             for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {
                 biquadFilterUpdateLPF(&gyro.lowpassFilter[axis].biquadFilterState, cutoffFreq, gyro.targetLooptime);
             }
+            break;
+        case  DYN_LPF_PT2:
+            for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {
+                pt2FilterUpdateCutoff(&gyro.lowpassFilter[axis].pt2FilterState, pt2FilterGain(cutoffFreq, gyroDt));
+            }
+            break;
+        case DYN_LPF_PT3:
+            for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {
+                pt3FilterUpdateCutoff(&gyro.lowpassFilter[axis].pt3FilterState, pt3FilterGain(cutoffFreq, gyroDt));
+            }
+            break;
         }
     }
 }

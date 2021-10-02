@@ -135,7 +135,7 @@ This is in the mathematical form of y = x/m + b and with a few measurements alon
 
 To calibrate your flight controller with a current meter follow these steps.
 
-1. Make a copy of [this google sheet](https://docs.google.com/spreadsheets/d/1lkL-X_FT9x2oqrwQEctDsEUhgdY19upNGc78M6FfJXY/). It will do all of the maths for you.
+1. Make a copy of [this google sheet](https://docs.google.com/spreadsheets/d/1lkL-X_FT9x2oqrwQEctDsEUhgdY19upNGc78M6FfJXY/). It will do all the math for you.
 2. Hook your ammeter up in series with your drone and a charged battery. I suggest an XT60 extender with one lead cut. Now your ammeter will be displaying the true current draw of your system.
 3. Connect to your flight controller through the configurator and check your current calibrations. Change them in the google sheet if needed.
 4. Use the motor tab to increase the throttle and change the current draw of the drone to around 1 A on the ammeter (it does not matter if it is not exact).
@@ -172,6 +172,16 @@ For example, assuming a maximum current of 34.2A, a minimum current of 2.8A, and
 ```
 amperage_meter_scale = (Imax - Imin) * 100000 / (Tmax + (Tmax * Tmax / 50))
                     = (34.2 - 2.8) * 100000 / (850 + (850 * 850 / 50))
+                    = 205
+amperage_meter_offset = Imin * 100 = 280
+```
+Measuring Imax requires a battery and an ESC that can both deliver and support max current for the duration of the measurement, so it's prone to big inaccuracies. Alternatively, current can be measured at a much lower throttle position and be taken into account in the calculations.
+
+Following the previous example, if we measured an Ibench current of 6A at 30% of throttle (1255 in the motors tab because (0.3*(max_throttle-1000))+1000))
+```
+Tbench = Tmax * bench_throttle = 850 * 0.3 = 255
+amperage_meter_scale = (Ibench - Imin) * 100000 / (Tbench + (Tbench * Tbench / 50))
+                    = (6 - 2.8) * 100000 / (255 + (255 * 255 / 50))
                     = 205
 amperage_meter_offset = Imin * 100 = 280
 ```

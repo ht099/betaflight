@@ -81,6 +81,8 @@
 
 #include "rx/rx.h"
 
+#include "scheduler/scheduler.h"
+
 #include "sensors/acceleration.h"
 #include "sensors/adcinternal.h"
 #include "sensors/barometer.h"
@@ -91,9 +93,8 @@
 #include "sensors/sensors.h"
 #include "sensors/rangefinder.h"
 
-#include "scheduler/scheduler.h"
-
 #include "telemetry/telemetry.h"
+#include "telemetry/crsf.h"
 
 #ifdef USE_BST
 #include "i2c_bst.h"
@@ -169,16 +170,20 @@ bool taskUpdateRxMainInProgress()
 
 static void taskUpdateRxMain(timeUs_t currentTimeUs)
 {
+    // Where we are using a state machine call ignoreTaskStateTime() for all states bar one
+    if (rxState != MODES) {
+        ignoreTaskStateTime();
+    }
+
     switch (rxState) {
     default:
     case CHECK:
-        ignoreTaskTime();
         rxState = PROCESS;
         break;
 
     case PROCESS:
-        ignoreTaskTime();
         if (!processRx(currentTimeUs)) {
+            rxState = CHECK;
             break;
         }
         rxState = MODES;
@@ -190,7 +195,6 @@ static void taskUpdateRxMain(timeUs_t currentTimeUs)
         break;
 
     case UPDATE:
-        ignoreTaskTime();
         // updateRcCommands sets rcCommand, which is needed by updateAltHoldState and updateSonarAltHoldState
         updateRcCommands();
         updateArmingStatus();
@@ -407,9 +411,13 @@ void tasksInit(void)
 #ifdef USE_RCDEVICE
     setTaskEnabled(TASK_RCDEVICE, rcdeviceIsEnabled());
 #endif
+
+#ifdef USE_CRSF_V3
+    const bool useCRSF = rxRuntimeState.serialrxProvider == SERIALRX_CRSF;
+    setTaskEnabled(TASK_SPEED_NEGOTIATION, useCRSF);
+#endif
 }
 
-#if defined(USE_TASK_STATISTICS)
 #define DEFINE_TASK(taskNameParam, subTaskNameParam, checkFuncParam, taskFuncParam, desiredPeriodParam, staticPriorityParam) {  \
     .taskName = taskNameParam, \
     .subTaskName = subTaskNameParam, \
@@ -418,15 +426,6 @@ void tasksInit(void)
     .desiredPeriodUs = desiredPeriodParam, \
     .staticPriority = staticPriorityParam \
 }
-#else
-#define DEFINE_TASK(taskNameParam, subTaskNameParam, checkFuncParam, taskFuncParam, desiredPeriodParam, staticPriorityParam) {  \
-    .checkFunc = checkFuncParam, \
-    .taskFunc = taskFuncParam, \
-    .desiredPeriodUs = desiredPeriodParam, \
-    .staticPriority = staticPriorityParam \
-}
-#endif
-
 
 task_t tasks[TASK_COUNT] = {
     [TASK_SYSTEM] = DEFINE_TASK("SYSTEM", "LOAD", NULL, taskSystemLoad, TASK_PERIOD_HZ(10), TASK_PRIORITY_MEDIUM_HIGH),
@@ -524,6 +523,10 @@ task_t tasks[TASK_COUNT] = {
 
 #ifdef USE_RANGEFINDER
     [TASK_RANGEFINDER] = DEFINE_TASK("RANGEFINDER", NULL, NULL, taskUpdateRangefinder, TASK_PERIOD_HZ(10), TASK_PRIORITY_IDLE),
+#endif
+
+#ifdef USE_CRSF_V3
+    [TASK_SPEED_NEGOTIATION] = DEFINE_TASK("SPEED_NEGOTIATION", NULL, NULL, speedNegotiationProcess, TASK_PERIOD_HZ(100), TASK_PRIORITY_IDLE),
 #endif
 };
 

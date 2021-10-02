@@ -204,7 +204,7 @@ TEST(FlightImuTest, TestSmallAngle)
 extern "C" {
 boxBitmask_t rcModeActivationMask;
 float rcCommand[4];
-int16_t rcData[MAX_SUPPORTED_RC_CHANNEL_COUNT];
+float rcData[MAX_SUPPORTED_RC_CHANNEL_COUNT];
 
 gyro_t gyro;
 acc_t acc;
@@ -250,4 +250,6 @@ void mixerSetThrottleAngleCorrection(int) {};
 bool gpsRescueIsRunning(void) { return false; }
 bool isFixedWing(void) { return false; }
 void pinioBoxTaskControl(void) {}
+void ignoreTaskShortExecTime(void) {}
+void ignoreTaskStateTime(void) {}
 }

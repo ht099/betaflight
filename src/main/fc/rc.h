@@ -24,17 +24,9 @@
 
 #include "fc/rc_controls.h"
 
-typedef enum {
-    INTERPOLATION_CHANNELS_RP,
-    INTERPOLATION_CHANNELS_RPY,
-    INTERPOLATION_CHANNELS_RPYT,
-    INTERPOLATION_CHANNELS_T,
-    INTERPOLATION_CHANNELS_RPT,
-} interpolationChannels_e;
-
 #ifdef USE_RC_SMOOTHING_FILTER
 #define RC_SMOOTHING_AUTO_FACTOR_MIN 0
-#define RC_SMOOTHING_AUTO_FACTOR_MAX 50
+#define RC_SMOOTHING_AUTO_FACTOR_MAX 250
 #endif
 
 void processRcCommand(void);
@@ -46,12 +38,13 @@ void updateRcCommands(void);
 void resetYawAxis(void);
 void initRcProcessing(void);
 bool isMotorsReversed(void);
-bool rcSmoothingIsEnabled(void);
 rcSmoothingFilter_t *getRcSmoothingData(void);
 bool rcSmoothingAutoCalculate(void);
 bool rcSmoothingInitializationComplete(void);
 float getRawSetpoint(int axis);
+float getRcCommandDelta(int axis);
 float applyCurve(int axis, float deflection);
-bool getShouldUpdateFf();
+bool getShouldUpdateFeedforward();
 void updateRcRefreshRate(timeUs_t currentTimeUs);
 uint16_t getCurrentRxRefreshRate(void);
+bool getRxRateValid(void);

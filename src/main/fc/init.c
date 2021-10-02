@@ -29,6 +29,7 @@
 
 #include "build/build_config.h"
 #include "build/debug.h"
+#include "build/debug_pin.h"
 
 #include "cms/cms.h"
 #include "cms/cms_types.h"
@@ -101,11 +102,9 @@
 #include "io/asyncfatfs/asyncfatfs.h"
 #include "io/beeper.h"
 #include "io/dashboard.h"
-#include "io/displayport_crsf.h"
 #include "io/displayport_frsky_osd.h"
 #include "io/displayport_max7456.h"
 #include "io/displayport_msp.h"
-#include "io/displayport_srxl.h"
 #include "io/flashfs.h"
 #include "io/gimbal.h"
 #include "io/gps.h"
@@ -177,29 +176,12 @@
 void targetPreInit(void);
 #endif
 
-#ifdef SOFTSERIAL_LOOPBACK
-serialPort_t *loopbackPort;
-#endif
-
 uint8_t systemState = SYSTEM_STATE_INITIALISING;
-
-void processLoopback(void)
-{
-#ifdef SOFTSERIAL_LOOPBACK
-    if (loopbackPort) {
-        uint8_t bytesWaiting;
-        while ((bytesWaiting = serialRxBytesWaiting(loopbackPort))) {
-            uint8_t b = serialRead(loopbackPort);
-            serialWrite(loopbackPort, b);
-        };
-    }
-#endif
-}
 
 #ifdef BUS_SWITCH_PIN
 void busSwitchInit(void)
 {
-static IO_t busSwitchResetPin        = IO_NONE;
+    IO_t busSwitchResetPin = IO_NONE;
 
     busSwitchResetPin = IOGetByTag(IO_TAG(BUS_SWITCH_PIN));
     IOInit(busSwitchResetPin, OWNER_SYSTEM, 0);
@@ -210,40 +192,6 @@ static IO_t busSwitchResetPin        = IO_NONE;
 }
 #endif
 
-bool requiresSpiLeadingEdge(SPIDevice device)
-{
-#if defined(CONFIG_IN_SDCARD) || defined(CONFIG_IN_EXTERNAL_FLASH)
-#if !defined(SDCARD_SPI_INSTANCE) && !defined(RX_SPI_INSTANCE)
-    UNUSED(device);
-#endif
-#if defined(SDCARD_SPI_INSTANCE)
-    if (device == spiDeviceByInstance(SDCARD_SPI_INSTANCE)) {
-        return true;
-    }
-#endif
-#if defined(RX_SPI_INSTANCE)
-    if (device == spiDeviceByInstance(RX_SPI_INSTANCE)) {
-        return true;
-    }
-#endif
-#else
-#if !defined(USE_SDCARD) && !defined(USE_RX_SPI)
-    UNUSED(device);
-#endif
-#if defined(USE_SDCARD)
-    if (device == SPI_CFG_TO_DEV(sdcardConfig()->device)) {
-        return true;
-    }
-#endif
-#if defined(USE_RX_SPI)
-    if (device == SPI_CFG_TO_DEV(rxSpiConfig()->spibus)) {
-        return true;
-    }
-#endif
-#endif // CONFIG_IN_SDCARD || CONFIG_IN_EXTERNAL_FLASH
-
-    return false;
-}
 
 static void configureSPIAndQuadSPI(void)
 {
@@ -257,22 +205,22 @@ static void configureSPIAndQuadSPI(void)
     spiPreinit();
 
 #ifdef USE_SPI_DEVICE_1
-    spiInit(SPIDEV_1, requiresSpiLeadingEdge(SPIDEV_1));
+    spiInit(SPIDEV_1);
 #endif
 #ifdef USE_SPI_DEVICE_2
-    spiInit(SPIDEV_2, requiresSpiLeadingEdge(SPIDEV_2));
+    spiInit(SPIDEV_2);
 #endif
 #ifdef USE_SPI_DEVICE_3
-    spiInit(SPIDEV_3, requiresSpiLeadingEdge(SPIDEV_3));
+    spiInit(SPIDEV_3);
 #endif
 #ifdef USE_SPI_DEVICE_4
-    spiInit(SPIDEV_4, requiresSpiLeadingEdge(SPIDEV_4));
+    spiInit(SPIDEV_4);
 #endif
 #ifdef USE_SPI_DEVICE_5
-    spiInit(SPIDEV_5, requiresSpiLeadingEdge(SPIDEV_5));
+    spiInit(SPIDEV_5);
 #endif
 #ifdef USE_SPI_DEVICE_6
-    spiInit(SPIDEV_6, requiresSpiLeadingEdge(SPIDEV_6));
+    spiInit(SPIDEV_6);
 #endif
 #endif // USE_SPI
 
@@ -320,6 +268,11 @@ void init(void)
     detectHardwareRevision();
 #endif
 
+#if defined(USE_TARGET_CONFIG)
+    // Call once before the config is loaded for any target specific configuration required to support loading the config
+    targetConfiguration();
+#endif
+
 #ifdef USE_BRUSHED_ESC_AUTODETECT
     // Opportunistically use the first motor pin of the default configuration for detection.
     // We are doing this as with some boards, timing seems to be important, and the later detection will fail.
@@ -364,10 +317,6 @@ void init(void)
 
     pgResetAll();
 
-#if defined(STM32H7) && defined(USE_SDCARD_SDIO) // H7 only for now, likely should be applied to F4/F7 too
-    sdioPinConfigure();
-    SDIO_GPIO_Init();
-#endif
 #ifdef USE_SDCARD_SPI
     configureSPIAndQuadSPI();
     initFlags |= SPI_AND_QSPI_INIT_ATTEMPTED;
@@ -375,6 +324,10 @@ void init(void)
 
     sdCardAndFSInit();
     initFlags |= SD_INIT_ATTEMPTED;
+
+    if (!sdcard_isInserted()) {
+        failureMode(FAILURE_SDCARD_REQUIRED);
+    }
 
     while (afatfs_getFilesystemState() != AFATFS_FILESYSTEM_STATE_READY) {
         afatfs_poll();
@@ -443,6 +396,10 @@ void init(void)
     }
 
     systemState |= SYSTEM_STATE_CONFIG_LOADED;
+
+#ifdef USE_DEBUG_PIN
+    dbgPinInit();
+#endif
 
 #ifdef USE_SDCARD
     // Ensure the SD card is initialised before the USB MSC starts to avoid a race condition
@@ -654,6 +611,10 @@ void init(void)
         if (blackboxConfig()->device == BLACKBOX_DEVICE_FLASH) {
             emfat_init_files();
         }
+#endif
+        // There's no more initialisation to be done, so enable DMA where possible for SPI
+#ifdef USE_SPI
+        spiInitBusDMA();
 #endif
         if (mscStart() == 0) {
              mscWaitForButton();
@@ -896,15 +857,6 @@ void init(void)
     timerStart();
 #endif
 
-#ifdef SOFTSERIAL_LOOPBACK
-    // FIXME this is a hack, perhaps add a FUNCTION_LOOPBACK to support it properly
-    loopbackPort = (serialPort_t*)&(softSerialPorts[0]);
-    if (!loopbackPort->vTable) {
-        loopbackPort = openSoftSerial(0, NULL, 19200, SERIAL_NOT_INVERTED);
-    }
-    serialPrint(loopbackPort, "LOOPBACK\r\n");
-#endif
-
     batteryInit(); // always needs doing, regardless of features.
 
 #ifdef USE_RCDEVICE
@@ -1011,20 +963,16 @@ void init(void)
     }
 #endif
 
-#if defined(USE_CMS) && defined(USE_SPEKTRUM_CMS_TELEMETRY) && defined(USE_TELEMETRY_SRXL)
-    // Register the srxl Textgen telemetry sensor as a displayport device
-    cmsDisplayPortRegister(displayPortSrxlInit());
-#endif
-
-#if defined(USE_CMS) && defined(USE_CRSF_CMS_TELEMETRY)
-    cmsDisplayPortRegister(displayPortCrsfInit());
-#endif
-
     setArmingDisabled(ARMING_DISABLED_BOOT_GRACE_TIME);
 
 #ifdef USE_MOTOR
     motorPostInit();
     motorEnable();
+#endif
+
+#ifdef USE_SPI
+    // Attempt to enable DMA on all SPI busses
+    spiInitBusDMA();
 #endif
 
     swdPinsInit();
